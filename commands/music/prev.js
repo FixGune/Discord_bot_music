@@ -50,7 +50,7 @@ module.exports = {
       });
     }
 
-    const success = playPrevious(interaction.guild.id);
+    const success = await playPrevious(interaction.guild.id);
 
     if (!success) {
       return await interaction.reply({

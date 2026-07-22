@@ -2,7 +2,7 @@ require('dotenv').config();
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { Client, Collection, Events, GatewayIntentBits } = require('discord.js');
+const { Client, Collection, Events, GatewayIntentBits, MessageFlags } = require('discord.js');
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
@@ -36,8 +36,6 @@ client.once(Events.ClientReady, readyClient => {
 });
 
 client.on(Events.InteractionCreate, async interaction => {
-  if (!interaction.isChatInputCommand()) return;
-
   const command = interaction.client.commands.get(interaction.commandName);
 
   if (!command) {
@@ -45,15 +43,35 @@ client.on(Events.InteractionCreate, async interaction => {
     return;
   }
 
+  if (interaction.isAutocomplete()) {
+    if (!command.autocomplete) return;
+
+    try {
+      await command.autocomplete(interaction);
+    } catch (error) {
+      console.error('Ошибка autocomplete:', error);
+    }
+
+    return;
+  }
+
+  if (!interaction.isChatInputCommand()) return;
+
   try {
     await command.execute(interaction);
   } catch (error) {
     console.error(error);
 
     if (interaction.replied || interaction.deferred) {
-      await interaction.followUp({ content: 'Произошла ошибка при выполнении команды.', ephemeral: true });
+      await interaction.followUp({
+        content: 'Произошла ошибка при выполнении команды.',
+        flags: 64,
+      });
     } else {
-      await interaction.reply({ content: 'Произошла ошибка при выполнении команды.', ephemeral: true });
+      await interaction.reply({
+        content: 'Произошла ошибка при выполнении команды.',
+        flags: 64,
+      });
     }
   }
 });

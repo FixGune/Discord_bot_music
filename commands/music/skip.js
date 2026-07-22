@@ -50,7 +50,7 @@ module.exports = {
       });
     }
 
-    const result = skipTrack(interaction.guild.id);
+    const result = await skipTrack(interaction.guild.id);
 
     if (!result.success) {
       return await interaction.reply({

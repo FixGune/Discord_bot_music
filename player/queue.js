@@ -1,9 +1,6 @@
-const {
-  createAudioResource,
-  StreamType,
-  AudioPlayerStatus,
-} = require('@discordjs/voice');
+const { createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
 const { getOrCreatePlayer, getPlayer } = require('./player');
+const { getYoutubeStream } = require('../services/youtube');
 
 const queues = new Map();
 
@@ -34,18 +31,54 @@ function getGuildState(guildId) {
   return queues.get(guildId);
 }
 
+function clearGuildState(guildId) {
+  queues.delete(guildId);
+}
+
 function addTrack(guildId, track) {
   const state = getOrCreateGuildState(guildId);
-  state.queue.push(track);
+
+  if (!track || typeof track !== 'object') {
+    throw new Error('В addTrack передан некорректный track');
+  }
+
+  if (!track.title || !track.url) {
+    throw new Error(`В addTrack передан track без title/url: ${JSON.stringify(track)}`);
+  }
+
+  const normalizedTrack = {
+    title: track.title,
+    url: track.url,
+    duration: track.duration || '00:00',
+    thumbnail: track.thumbnail || null,
+    author: track.author || 'Unknown',
+    requestedBy: track.requestedBy || null,
+  };
+
+  state.queue.push(normalizedTrack);
+
+  console.log(`[${guildId}] Трек добавлен в очередь ->`, normalizedTrack);
+  console.log(`[${guildId}] Размер очереди после добавления: ${state.queue.length}`);
 }
 
-function createTrackResource(track) {
-  return createAudioResource(track.url, {
-    inputType: StreamType.Arbitrary,
-  });
+async function createTrackResource(track) {
+  if (!track || typeof track !== 'object') {
+    throw new Error('Трек не передан в createTrackResource');
+  }
+
+  if (!track.url || typeof track.url !== 'string') {
+    throw new Error(`У трека отсутствует корректный url: ${JSON.stringify(track)}`);
+  }
+
+  if (track.url.includes('youtube.com') || track.url.includes('youtu.be')) {
+    const stream = getYoutubeStream(track.url);
+    return createAudioResource(stream);
+  }
+
+  return createAudioResource(track.url);
 }
 
-function playTrack(guildId, track, options = {}) {
+async function playTrack(guildId, track, options = {}) {
   const state = getOrCreateGuildState(guildId);
   const player = getOrCreatePlayer(guildId);
   const { addToHistory = true } = options;
@@ -56,11 +89,17 @@ function playTrack(guildId, track, options = {}) {
 
   state.currentTrack = track;
 
-  const resource = createTrackResource(track);
+  console.log(`[${guildId}] playTrack ->`, {
+  title: track?.title,
+  url: track?.url,
+  duration: track?.duration,
+});
+
+  const resource = await createTrackResource(track);
   player.play(resource);
 }
 
-function playNext(guildId) {
+async function playNext(guildId) {
   const state = getOrCreateGuildState(guildId);
 
   if (state.queue.length === 0) {
@@ -69,11 +108,11 @@ function playNext(guildId) {
   }
 
   const nextTrack = state.queue.shift();
-  playTrack(guildId, nextTrack, { addToHistory: true });
+  await playTrack(guildId, nextTrack, { addToHistory: true });
   return true;
 }
 
-function playPrevious(guildId) {
+async function playPrevious(guildId) {
   const state = getOrCreateGuildState(guildId);
 
   if (state.history.length === 0) {
@@ -85,38 +124,8 @@ function playPrevious(guildId) {
   }
 
   const previousTrack = state.history.pop();
-  playTrack(guildId, previousTrack, { addToHistory: false });
+  await playTrack(guildId, previousTrack, { addToHistory: false });
   return true;
-}
-
-function skipTrack(guildId) {
-  const state = getOrCreateGuildState(guildId);
-  const player = getPlayer(guildId);
-
-  if (!state.currentTrack) {
-    return { success: false, reason: 'NO_CURRENT_TRACK' };
-  }
-
-  if (state.queue.length === 0) {
-    state.currentTrack = null;
-
-    if (player) {
-      state.isTransitioning = true;
-      player.stop(true);
-    }
-
-    return { success: false, reason: 'NO_NEXT_TRACK' };
-  }
-
-  state.history.push(state.currentTrack);
-
-  const nextTrack = state.queue.shift();
-  state.currentTrack = nextTrack;
-
-  const resource = createTrackResource(nextTrack);
-  player.play(resource);
-
-  return { success: true, track: nextTrack };
 }
 
 function stopAndClear(guildId) {
@@ -133,10 +142,56 @@ function stopAndClear(guildId) {
   }
 }
 
-function handleTrackEnd(guildId) {
+async function skipTrack(guildId) {
+  const state = getOrCreateGuildState(guildId);
+  const player = getPlayer(guildId);
+
+  console.log(`[${guildId}] skipTrack вызван`);
+  console.log(`[${guildId}] currentTrack:`, state.currentTrack);
+  console.log(`[${guildId}] queue before skip:`, state.queue);
+
+  if (!state.currentTrack) {
+    return { success: false, reason: 'NO_CURRENT_TRACK' };
+  }
+
+  if (state.queue.length === 0) {
+    state.currentTrack = null;
+
+    if (player) {
+      state.isTransitioning = true;
+      player.stop(true);
+    }
+
+    return { success: false, reason: 'NO_NEXT_TRACK' };
+  }
+
+  const nextTrack = state.queue.shift();
+
+  if (!nextTrack || !nextTrack.url) {
+    console.error(`[${guildId}] Некорректный nextTrack в skipTrack:`, nextTrack);
+    return { success: false, reason: 'INVALID_NEXT_TRACK' };
+  }
+
+  state.history.push(state.currentTrack);
+  state.currentTrack = nextTrack;
+
+  console.log(`[${guildId}] nextTrack после shift:`, nextTrack);
+
+  const resource = await createTrackResource(nextTrack);
+  player.play(resource);
+
+  return { success: true, track: nextTrack };
+}
+
+async function handleTrackEnd(guildId) {
   const state = getGuildState(guildId);
 
   if (!state) return;
+
+  console.log(`[${guildId}] handleTrackEnd вызван`);
+  console.log(`[${guildId}] currentTrack до обработки:`, state.currentTrack?.title ?? null);
+  console.log(`[${guildId}] queue length до обработки: ${state.queue.length}`);
+  console.log(`[${guildId}] queue snapshot:`, state.queue);
 
   if (state.isTransitioning) {
     state.isTransitioning = false;
@@ -145,11 +200,19 @@ function handleTrackEnd(guildId) {
 
   if (state.queue.length === 0) {
     state.currentTrack = null;
+    console.log(`[${guildId}] Очередь пуста, currentTrack сброшен.`);
     return;
   }
 
   const nextTrack = state.queue.shift();
-  playTrack(guildId, nextTrack, { addToHistory: true });
+
+  if (!nextTrack || !nextTrack.url) {
+    console.error(`[${guildId}] Некорректный nextTrack в handleTrackEnd:`, nextTrack);
+    state.currentTrack = null;
+    return;
+  }
+
+  await playTrack(guildId, nextTrack, { addToHistory: true });
 }
 
 function getCurrentTrack(guildId) {
@@ -167,21 +230,17 @@ function hasHistoryItems(guildId) {
   return state.history.length > 0;
 }
 
-function clearGuildState(guildId) {
-  queues.delete(guildId);
-}
-
 module.exports = {
   getOrCreateGuildState,
   getGuildState,
+  clearGuildState,
   addTrack,
   playTrack,
   playNext,
   playPrevious,
   stopAndClear,
-  clearGuildState,
+  skipTrack,
   getCurrentTrack,
   hasQueueItems,
   hasHistoryItems,
-  skipTrack,
 };
