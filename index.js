@@ -8,6 +8,8 @@ const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
 });
 
+const leaveTimers = new Map();
+
 client.commands = new Collection();
 
 const foldersPath = path.join(__dirname, 'commands');
@@ -53,6 +55,69 @@ client.on(Events.InteractionCreate, async interaction => {
     } else {
       await interaction.reply({ content: 'Произошла ошибка при выполнении команды.', ephemeral: true });
     }
+  }
+});
+
+const { getVoiceConnection } = require('@discordjs/voice');
+
+client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
+  const connection = getVoiceConnection(newState.guild.id);
+
+  if (!connection) return;
+
+  const botVoiceChannelId = newState.guild.members.me?.voice?.channelId;
+
+  if (!botVoiceChannelId) return;
+
+  if (oldState.channelId !== botVoiceChannelId && newState.channelId !== botVoiceChannelId) {
+    return;
+  }
+
+  const botVoiceChannel = newState.guild.channels.cache.get(botVoiceChannelId);
+
+  if (!botVoiceChannel) return;
+
+  const humanMembers = botVoiceChannel.members.filter(member => !member.user.bot);
+  const existingTimer = leaveTimers.get(newState.guild.id);
+
+  if (humanMembers.size === 0) {
+    if (existingTimer) return;
+
+    const timer = setTimeout(() => {
+      const currentConnection = getVoiceConnection(newState.guild.id);
+      const currentBotChannelId = newState.guild.members.me?.voice?.channelId;
+
+      if (!currentConnection || !currentBotChannelId) {
+        leaveTimers.delete(newState.guild.id);
+        return;
+      }
+
+      const currentBotChannel = newState.guild.channels.cache.get(currentBotChannelId);
+
+      if (!currentBotChannel) {
+        leaveTimers.delete(newState.guild.id);
+        return;
+      }
+
+      const currentHumanMembers = currentBotChannel.members.filter(member => !member.user.bot);
+
+      if (currentHumanMembers.size === 0) {
+        currentConnection.destroy();
+        console.log(`Бот вышел из канала ${currentBotChannel.name}, потому что 1 минуту там никого не было.`);
+      }
+
+      leaveTimers.delete(newState.guild.id);
+    }, 60_000);
+
+    leaveTimers.set(newState.guild.id, timer);
+    console.log(`Канал ${botVoiceChannel.name} пуст. Запущен таймер выхода на 1 минуту.`);
+    return;
+  }
+
+  if (existingTimer) {
+    clearTimeout(existingTimer);
+    leaveTimers.delete(newState.guild.id);
+    console.log(`В канал ${botVoiceChannel.name} кто-то вернулся. Таймер выхода отменен.`);
   }
 });
 
