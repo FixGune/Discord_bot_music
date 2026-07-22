@@ -1,11 +1,7 @@
 const { SlashCommandBuilder, MessageFlags } = require('discord.js');
-const {
-  getVoiceConnection,
-  joinVoiceChannel,
-  createAudioResource,
-  StreamType,
-} = require('@discordjs/voice');
-const player = require('../../player/player');
+const { getVoiceConnection, joinVoiceChannel } = require('@discordjs/voice');
+const { getOrCreatePlayer } = require('../../player/player');
+const { playTrack, getCurrentTrack } = require('../../player/queue');
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -32,17 +28,20 @@ module.exports = {
       });
     }
 
+    const player = getOrCreatePlayer(interaction.guild.id);
     connection.subscribe(player);
 
-    const resource = createAudioResource(
-      'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-      {
-        inputType: StreamType.Arbitrary,
-      }
-    );
+    const currentTrack = getCurrentTrack(interaction.guild.id);
 
-    player.play(resource);
+    const track = {
+      title: 'SoundHelix Song 1',
+      url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+    };
 
-    await interaction.reply('Начинаю воспроизведение тестового трека.');
+    playTrack(interaction.guild.id, track, {
+      addToHistory: currentTrack !== null,
+    });
+
+    await interaction.reply(`Начинаю воспроизведение: ${track.title}`);
   },
 };
