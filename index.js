@@ -1,3 +1,4 @@
+require('./database/db');
 require('dotenv').config();
 
 const fs = require('node:fs');
@@ -140,3 +141,6 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 });
 
 client.login(process.env.TOKEN);
+
+const { getGuildPlaylists } = require('./services/playlists');
+console.log('Playlists test:', getGuildPlaylists('test-guild'));
