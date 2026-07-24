@@ -216,15 +216,29 @@ module.exports = {
       }
     }
 
-    if (subcommand === 'delete') {
-      const existingPlaylist = getPlaylistByName(guildId, name);
+            if (subcommand === 'delete') {
+        const existingPlaylist = getPlaylistByName(guildId, name);
 
-      if (!existingPlaylist) {
-        return await interaction.reply({
-          content: `Плейлист "${name}" не найден на этом сервере.`,
-          flags: MessageFlags.Ephemeral,
-        });
-      }
+        if (!existingPlaylist) {
+            return await interaction.reply({
+            content: `Плейлист "${name}" не найден на этом сервере.`,
+            flags: MessageFlags.Ephemeral,
+            });
+        }
+
+        if (isFavoritePlaylistName(name)) {
+            return await interaction.reply({
+            content: `Плейлист "${FAVORITE_PLAYLIST_NAME}" защищён от удаления.`,
+            flags: MessageFlags.Ephemeral,
+            });
+        }
+
+            if (!existingPlaylist) {
+                return await interaction.reply({
+                content: `Плейлист "${name}" не найден на этом сервере.`,
+                flags: MessageFlags.Ephemeral,
+                });
+            }
 
       try {
         const deleted = deletePlaylist(guildId, name);

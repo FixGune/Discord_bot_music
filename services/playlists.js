@@ -1,5 +1,7 @@
 const db = require('../database/db');
 
+const FAVORITE_PLAYLIST_NAME = 'Favorite';
+
 function normalizePlaylistName(name) {
   if (!name || typeof name !== 'string') {
     throw new Error('Имя плейлиста должно быть строкой.');
@@ -14,8 +16,47 @@ function normalizePlaylistName(name) {
   return trimmed;
 }
 
+function isFavoritePlaylistName(name) {
+  const normalizedName = normalizePlaylistName(name);
+  return normalizedName.toLowerCase() === FAVORITE_PLAYLIST_NAME.toLowerCase();
+}
+
+function ensureFavoritePlaylist(guildId, createdBy = 'system') {
+  const existingPlaylist = getPlaylistByName(guildId, FAVORITE_PLAYLIST_NAME);
+
+  if (existingPlaylist) {
+    return existingPlaylist;
+  }
+
+  const stmt = db.prepare(`
+    INSERT INTO playlists (guild_id, name, created_by)
+    VALUES (?, ?, ?)
+  `);
+
+  try {
+    const result = stmt.run(guildId, FAVORITE_PLAYLIST_NAME, createdBy);
+
+    return {
+      id: result.lastInsertRowid,
+      guildId,
+      name: FAVORITE_PLAYLIST_NAME,
+      createdBy,
+    };
+  } catch (error) {
+    if (error.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      return getPlaylistByName(guildId, FAVORITE_PLAYLIST_NAME);
+    }
+
+    throw error;
+  }
+}
+
 function createPlaylist(guildId, name, createdBy) {
   const normalizedName = normalizePlaylistName(name);
+
+  if (isFavoritePlaylistName(normalizedName)) {
+    return null;
+  }
 
   const stmt = db.prepare(`
     INSERT INTO playlists (guild_id, name, created_by)
@@ -41,14 +82,21 @@ function createPlaylist(guildId, name, createdBy) {
 }
 
 function getGuildPlaylists(guildId) {
+  ensureFavoritePlaylist(guildId);
+
   const stmt = db.prepare(`
     SELECT id, guild_id, name, created_by, created_at
     FROM playlists
     WHERE guild_id = ?
-    ORDER BY name COLLATE NOCASE ASC
+    ORDER BY
+      CASE
+        WHEN LOWER(name) = LOWER(?) THEN 0
+        ELSE 1
+      END,
+      name COLLATE NOCASE ASC
   `);
 
-  return stmt.all(guildId);
+  return stmt.all(guildId, FAVORITE_PLAYLIST_NAME);
 }
 
 function getPlaylistByName(guildId, name) {
@@ -65,6 +113,10 @@ function getPlaylistByName(guildId, name) {
 
 function deletePlaylist(guildId, name) {
   const normalizedName = normalizePlaylistName(name);
+
+  if (isFavoritePlaylistName(normalizedName)) {
+    return false;
+  }
 
   const stmt = db.prepare(`
     DELETE FROM playlists
@@ -193,6 +245,10 @@ function removeTrackFromPlaylist(guildId, playlistName, trackId) {
 }
 
 module.exports = {
+  FAVORITE_PLAYLIST_NAME,
+  normalizePlaylistName,
+  isFavoritePlaylistName,
+  ensureFavoritePlaylist,
   createPlaylist,
   getGuildPlaylists,
   getPlaylistByName,
