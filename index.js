@@ -141,6 +141,3 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
 });
 
 client.login(process.env.TOKEN);
-
-const { getGuildPlaylists } = require('./services/playlists');
-console.log('Playlists test:', getGuildPlaylists('test-guild'));
